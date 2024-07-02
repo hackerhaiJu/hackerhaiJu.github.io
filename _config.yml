@@ -5,9 +5,9 @@ header-img: img/post-bg-desk.jpg
 email: iamxiaohaijun@gmail.com
 description: "这是一个打工人的博客"
 keyword: "Java,Spring Cloud,Spring Boot"
-url: "http://haijun.github.io"          # your host, for absolute URL
+url: "https://hackerhaiju.github.io/"          # your host, for absolute URL
 baseurl: ""      # for example, '/blog' if your blog hosted on 'host/blog'
-github_repo: "https://haijun.github.io.git" # you code repository
+github_repo: "https://hackerhaiju.github.io.git" # you code repository
 
 # Sidebar settings
 sidebar: true                           # whether or not using Sidebar.
