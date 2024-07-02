@@ -1,1518 +1,600 @@
 ---
 layout:     post
-title:      ReactiveCocoa 进阶
-subtitle:   函数式编程框架 ReactiveCocoa 进阶
-date:       2017-01-06
+title:      Stable Diffusion笔记记录
+subtitle:   Stable Diffusion笔记
+date:       2024-07-02
 author:     BY
 header-img: img/post-bg-ios9-web.jpg
 catalog: true
 tags:
-    - iOS
-    - ReactiveCocoa
-    - 函数式编程
-    - 开源框架
+    - SD
+    - AI
+    - 人工智能
 ---
-# 前言
-
->在[上篇文章](http://haijun.github.io/2016/12/26/ReactiveCocoa-基础/)中介绍了**ReactiveCocoa**的基础知识,接下来我们来深入介绍**ReactiveCocoa**及其在**MVVM**中的用法。
-
-
-![ReactiveCocoa进阶思维导图](https://ww3.sinaimg.cn/large/006y8lVagw1fbgye3re5xj30je0iomz8.jpg)
-# 常见操作方法介绍
-
-
-#### 操作须知
-
-所有的信号（RACSignal）都可以进行操作处理，因为所有操作方法都定义在RACStream.h中，因此只要继承RACStream就有了操作处理方法。
-#### 操作思想
-
-运用的是Hook（钩子）思想，Hook是一种用于改变API(应用程序编程接口：方法)执行结果的技术.
-
-Hook用处：截获API调用的技术。
-
-有关Hook的知识可以看我的这篇博客[《Objective-C Runtime 的一些基本使用》](http://www.jianshu.com/p/ff114e69cc0a)中的 *更换代码的实现方法* 一节,
-
-Hook原理：在每次调用一个API返回结果之前，先执行你自己的方法，改变结果的输出。
-
-#### 操作方法
-
-#### **bind**（绑定）- ReactiveCocoa核心方法
-
-**ReactiveCocoa** 操作的核心方法是 **bind**（绑定）,而且也是RAC中核心开发方式。之前的开发方式是赋值，而用RAC开发，应该把重心放在绑定，也就是可以在创建一个对象的时候，就绑定好以后想要做的事情，而不是等赋值之后在去做事情。
-
-列如，把数据展示到控件上，之前都是重写控件的 `setModel` 方法，用RAC就可以在一开始创建控件的时候，就绑定好数据。
-
-- **作用**
-
-	RAC底层都是调用**bind**， 在开发中很少直接使用 **bind** 方法，**bind**属于RAC中的底层方法，我们只需要调用封装好的方法，**bind**用作了解即可.
-
-- **bind方法使用步骤**
-     1. 传入一个返回值 `RACStreamBindBlock` 的 block。
-     2. 描述一个 `RACStreamBindBlock` 类型的 `bindBlock`作为block的返回值。
-     3. 描述一个返回结果的信号，作为 `bindBlock` 的返回值。
-     
-     注意：在bindBlock中做信号结果的处理。
-- 	**bind方法参数**
-	
-	**RACStreamBindBlock**:
-`typedef RACStream * (^RACStreamBindBlock)(id value, BOOL *stop);`
-
-     `参数一(value)`:表示接收到信号的原始值，还没做处理
-     
-     `参数二(*stop)`:用来控制绑定Block，如果*stop = yes,那么就会结束绑定。
-     
-     `返回值`：信号，做好处理，在通过这个信号返回出去，一般使用 `RACReturnSignal`,需要手动导入头文件`RACReturnSignal.h`
-
-- **使用**
-
-	假设想监听文本框的内容，并且在每次输出结果的时候，都在文本框的内容拼接一段文字“输出：”
-
-	- 使用封装好的方法：在返回结果后，拼接。
-
-		```
-		[_textField.rac_textSignal subscribeNext:^(id x) {
-		
-			// 在返回结果后，拼接 输出：
-			NSLog(@"输出:%@",x);
-		
-		}];
-		```
-
-
-	- 方式二:，使用RAC中 `bind` 方法做处理，在返回结果前，拼接。
-	  
-		这里需要手动导入`#import <ReactiveCocoa/RACReturnSignal.h>`，才能使用`RACReturnSignal`
-
-		```	
-		[[_textField.rac_textSignal bind:^RACStreamBindBlock{
-		   // 什么时候调用:
-		   // block作用:表示绑定了一个信号.
-		
-		   return ^RACStream *(id value, BOOL *stop){
-		
-		       // 什么时候调用block:当信号有新的值发出，就会来到这个block。
-		
-		       // block作用:做返回值的处理
-		
-		       // 做好处理，在返回结果前，拼接 输出:
-		       return [RACReturnSignal return:[NSString stringWithFormat:@"输出:%@",value]];
-		   };
-		
-		}] subscribeNext:^(id x) {
-		
-		   NSLog(@"%@",x);
-		
-		}];
-
-		```
-
-- **底层实现**
-     1. 源信号调用bind,会重新创建一个绑定信号。
-     2. 当绑定信号被订阅，就会调用绑定信号中的 `didSubscribe` ，生成一个 `bindingBlock` 。
-     3. 当源信号有内容发出，就会把内容传递到 `bindingBlock` 处理，调用`bindingBlock(value,stop)`
-     4. 调用`bindingBlock(value,stop)`，会返回一个内容处理完成的信号`RACReturnSignal`。
-     5. 订阅`RACReturnSignal`，就会拿到绑定信号的订阅者，把处理完成的信号内容发送出来。
-    
-     注意:不同订阅者，保存不同的nextBlock，看源码的时候，一定要看清楚订阅者是哪个。
-
-#### 映射
-
-映射主要用这两个方法实现：**flattenMap**,**Map**,用于把源信号内容映射成新的内容。
-
-###### flattenMap
-
-- **作用**
-
-	把源信号的内容映射成一个新的信号，信号可以是任意类型
-
-- **使用步骤**
-
-     1. 传入一个block，block类型是返回值`RACStream`，参数value
-     2. 参数value就是源信号的内容，拿到源信号的内容做处理
-     3. 包装成`RACReturnSignal`信号，返回出去。
-
-
-
-- **使用**
-
-	监听文本框的内容改变，把结构重新映射成一个新值.
-	
-	```
-	[[_textField.rac_textSignal flattenMap:^RACStream *(id value) {
-        
-        // block调用时机：信号源发出的时候
-        
-        // block作用：改变信号的内容
-        
-        // 返回RACReturnSignal
-        return [RACReturnSignal return:[NSString stringWithFormat:@"信号内容：%@", value]];
-        
-    }] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    ```
-- **底层实现**
-
-     0. **flattenMap**内部调用 `bind` 方法实现的,**flattenMap**中block的返回值，会作为bind中bindBlock的返回值。
-     1. 当订阅绑定信号，就会生成 `bindBlock`。
-     2. 当源信号发送内容，就会调用` bindBlock(value, *stop)`
-     3. 调用`bindBlock`，内部就会调用 **flattenMap** 的 bloc k，**flattenMap** 的block作用：就是把处理好的数据包装成信号。
-     4. 返回的信号最终会作为 `bindBlock` 中的返回信号，当做 `bindBlock` 的返回信号。
-     5. 订阅 `bindBlock` 的返回信号，就会拿到绑定信号的订阅者，把处理完成的信号内容发送出来。
-	
-###### Map
-
-- **作用**
- 
-	把源信号的值映射成一个新的值
-
-	
-- **使用步骤**
-     1. 传入一个block,类型是返回对象，参数是 `value`
-     2. `value`就是源信号的内容，直接拿到源信号的内容做处理
-     3. 把处理好的内容，直接返回就好了，不用包装成信号，返回的值，就是映射的值。
-    
-- **使用**
-
-	监听文本框的内容改变，把结构重新映射成一个新值.
-     
-    ```
-	[[_textField.rac_textSignal map:^id(id value) {
-       
-       // 拼接完后，返回对象
-        return [NSString stringWithFormat:@"信号内容: %@", value];
-        
-    }] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-	```
-- **底层实现**:
-     0. Map底层其实是调用 `flatternMa`p,`Map` 中block中的返回的值会作为 `flatternMap` 中block中的值
-     1. 当订阅绑定信号，就会生成 `bindBlock` 
-     3. 当源信号发送内容，就会调用 `bindBlock(value, *stop)`
-     4. 调用 `bindBlock` ，内部就会调用 `flattenMap的block`
-     5. `flattenMap的block` 内部会调用 `Map` 中的block，把 `Map` 中的block返回的内容包装成返回的信号
-     5. 返回的信号最终会作为 `bindBlock` 中的返回信号，当做 `bindBlock` 的返回信号
-     6. 订阅 `bindBlock` 的返回信号，就会拿到绑定信号的订阅者，把处理完成的信号内容发送出来。
-
-###### FlatternMap 和 Map 的区别
--  **FlatternMap** 中的Block **返回信号**。 
-2. **Map** 中的Block **返回对象**。
-3. 开发中，如果信号发出的值 **不是信号** ，映射一般使用 `Map`
-4. 如果信号发出的值 **是信号**，映射一般使用 `FlatternMap`。
-
-
-
-- `signalOfsignals`用 **FlatternMap**
-
-	```
-    // 创建信号中的信号
-    RACSubject *signalOfsignals = [RACSubject subject];
-    RACSubject *signal = [RACSubject subject];
-
-    [[signalOfsignals flattenMap:^RACStream *(id value) {
-
-     // 当signalOfsignals的signals发出信号才会调用
-
-        return value;
-
-    }] subscribeNext:^(id x) {
-
-        // 只有signalOfsignals的signal发出信号才会调用，因为内部订阅了bindBlock中返回的信号，也就是flattenMap返回的信号。
-        // 也就是flattenMap返回的信号发出内容，才会调用。
-
-        NSLog(@"signalOfsignals：%@",x);
-    }];
-
-    // 信号的信号发送信号
-    [signalOfsignals sendNext:signal];
-
-    // 信号发送内容
-    [signal sendNext:@"hi"];
-	
-	```
-	
-#### 组合
-
-组合就是将多个信号按照某种规则进行拼接，合成新的信号。
-
-###### concat
-
-- **作用** 
-
-	按**顺序拼接**信号，当多个信号发出的时候，有顺序的接收信号。
-- **底层实现**
-     1. 当拼接信号被订阅，就会调用拼接信号的didSubscribe
-     2. didSubscribe中，会先订阅第一个源信号（signalA）
-     3. 会执行第一个源信号（signalA）的didSubscribe
-     4. 第一个源信号（signalA）didSubscribe中发送值，就会调用第一个源信号（signalA）订阅者的nextBlock,通过拼接信号的订阅者把值发送出来.
-     5. 第一个源信号（signalA）didSubscribe中发送完成，就会调用第一个源信号（signalA）订阅者的completedBlock,订阅第二个源信号（signalB）这时候才激活（signalB）。
-     6. 订阅第二个源信号（signalB）,执行第二个源信号（signalB）的didSubscribe
-     7. 第二个源信号（signalA）didSubscribe中发送值,就会通过拼接信号的订阅者把值发送出来.
-- **使用步骤**
-
-	1. 使用`concat:`拼接信号
-	2. 订阅拼接信号，内部会自动按拼接顺序订阅信号
-- **使用**
-
-	拼接信号 `signalA`、 `signalB`、 `signalC`
-	
-	```
-	RACSignal *signalA = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"Hello"];
-        
-        [subscriber sendCompleted];
-        
-        return nil;
-    }];
-    
-    RACSignal *signalB = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"World"];
-        
-        [subscriber sendCompleted];
-        
-        return nil;
-    }];
-    
-    RACSignal *signalC = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"!"];
-        
-        [subscriber sendCompleted];
-        
-        return nil;
-    }];
-    
-    // 拼接 A B, 把signalA拼接到signalB后，signalA发送完成，signalB才会被激活。
-    RACSignal *concatSignalAB = [signalA concat:signalB];
-    
-    // A B + C
-    RACSignal *concatSignalABC = [concatSignalAB concat:signalC];
-    
-    
-    // 订阅拼接的信号, 内部会按顺序订阅 A->B->C
-    // 注意：第一个信号必须发送完成，第二个信号才会被激活...
-    [concatSignalABC subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-	```
-
-######  then
-- **作用** 
-
-	用于连接两个信号，当第一个信号完成，才会连接then返回的信号。
-- **底层实现**
-	
-	1. 先过滤掉之前的信号发出的值
-	2. 使用concat连接then返回的信号
-	
-- **使用**
-
-	```
-   [[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-      
-      [subscriber sendNext:@1];
-      
-      [subscriber sendCompleted];
-      
-      return nil;
-      
-    }] then:^RACSignal *{
-      
-      	return [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-          
-          [subscriber sendNext:@2];
-          
-          return nil;
-      }];
-      
-    }] subscribeNext:^(id x) {
-      
-      // 只能接收到第二个信号的值，也就是then返回信号的值
-      NSLog(@"%@", x);
-      
-    }];
-    
-    ///
-    输出：2
-	```
-- **注意**
-
-	注意使用`then`，之前信号的值会被忽略掉.
-
-###### merge
-- **作用** 
-	
-	合并信号,任何一个信号发送数据，都能监听到.
-- **底层实现**
-
-     1. 合并信号被订阅的时候，就会遍历所有信号，并且发出这些信号。
-     2. 每发出一个信号，这个信号就会被订阅
-     3. 也就是合并信号一被订阅，就会订阅里面所有的信号。
-     4. 只要有一个信号被发出就会被监听。
-- **使用**
-
-	```
-	RACSignal *signalA = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"A"];
-        
-        return nil;
-    }];
-
-    RACSignal *signalB = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"B"];
-        
-        return nil;
-    }];
-
-    // 合并信号, 任何一个信号发送数据，都能监听到
-    RACSignal *mergeSianl = [signalA merge:signalB];
-
-    [mergeSianl subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    // 输出
-	2017-01-03 13:29:08.013 ReactiveCocoa进阶[3627:718315] A
-	2017-01-03 13:29:08.014 ReactiveCocoa进阶[3627:718315] B
-
-    
-	```
-
-###### zip
-
-- **作用** 
-	
-	把两个信号压缩成一个信号，只有当两个信号 **同时** 发出信号内容时，并且把两个信号的内容合并成一个元组，才会触发压缩流的next事件。
-- **底层实现**
-	
-	1. 定义压缩信号，内部就会自动订阅signalA，signalB
-	2. 每当signalA或者signalB发出信号，就会判断signalA，signalB有没有发出个信号，有就会把每个信号 第一次 发出的值包装成元组发出
-	     
-- **使用**
-
-	```
-	RACSignal *signalA = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"A1"];
-        [subscriber sendNext:@"A2"];
-        
-        return nil;
-    }];
-    
-    RACSignal *signalB = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"B1"];
-        [subscriber sendNext:@"B2"];
-        [subscriber sendNext:@"B3"];
-        
-        return nil;
-    }];
-    
-    RACSignal *zipSignal = [signalA zipWith:signalB];
-    
-    [zipSignal subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-	
-	// 输出
-	2017-01-03 13:48:09.234 ReactiveCocoa进阶[3997:789720] zipWith: <RACTuple: 0x600000004df0> (
-    A1,
-    B1
-	)
-	2017-01-03 13:48:09.234 ReactiveCocoa进阶[3997:789720] zipWith: <RACTuple: 0x608000003410> (
-    A2,
-    B2
-	)
-	```
-	
-	
-###### combineLatest
-- **作用** 
-	
-	将多个信号合并起来，并且拿到各个信号最后一个值,必须每个合并的signal至少都有过一次sendNext，才会触发合并的信号。
-
-- **底层实现**
-	
- 	1. 当组合信号被订阅，内部会自动订阅signalA，signalB,必须两个信号都发出内容，才会被触发。
- 	2. 并且把两个信号的 最后一次 发送的值组合成元组发出。
-	     
-- **使用**
-
-	```
-	RACSignal *signalA = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"A1"];
-        [subscriber sendNext:@"A2"];
-        
-        return nil;
-    }];
-    
-    RACSignal *signalB = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"B1"];
-        [subscriber sendNext:@"B2"];
-        [subscriber sendNext:@"B3"];
-        
-        return nil;
-    }];
-    
-    RACSignal *combineSianal = [signalA combineLatestWith:signalB];
-    
-    [combineSianal subscribeNext:^(id x) {
-        
-        NSLog(@"combineLatest:%@", x);
-    }];
-	
-	// 输出
-	2017-01-03 13:48:09.235 ReactiveCocoa进阶[3997:789720] combineLatest:<RACTuple: 0x60800000e150> (
-    A2,
-    B1
-	)
-	2017-01-03 13:48:09.235 ReactiveCocoa进阶[3997:789720] combineLatest:<RACTuple: 0x600000004db0> (
-    A2,
-    B2
-	)
-	2017-01-03 13:48:09.236 ReactiveCocoa进阶[3997:789720] combineLatest:<RACTuple: 0x60800000e180> (
-    A2,
-    B3
-	)
-	```
-	
-- **注意**
-
-	**combineLatest**与**zip**用法相似，必须每个合并的signal至少都有过一次sendNext，才会触发合并的信号。
-	
-	区别看下图：
-	
-	![](https://ww2.sinaimg.cn/large/006y8lVagw1fbdf6cyez6j30id0kkabf.jpg)
-
-
-###### reduce   
-
-- **作用** 
-	
-	把信号发出元组的值聚合成一个值
-- **底层实现**
-	
- 	1. 订阅聚合信号，
- 	2. 每次有内容发出，就会执行reduceblcok，把信号内容转换成reduceblcok返回的值。
-	     
-- **使用**
-
-     常见的用法，（先组合在聚合）`combineLatest:(id<NSFastEnumeration>)signals reduce:(id (^)())reduceBlock`
-     
-     reduce中的block简介:
-     
-     reduceblcok中的参数，有多少信号组合，reduceblcok就有多少参数，每个参数就是之前信号发出的内容
-     reduceblcok的返回值：聚合信号之后的内容。
-
-
-
-	```
-	    RACSignal *signalA = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"A1"];
-        [subscriber sendNext:@"A2"];
-        
-        return nil;
-    }];
-    
-    RACSignal *signalB = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"B1"];
-        [subscriber sendNext:@"B2"];
-        [subscriber sendNext:@"B3"];
-        
-        return nil;
-    }];
-    
-    
-    RACSignal *reduceSignal = [RACSignal combineLatest:@[signalA, signalB] reduce:^id(NSString *str1, NSString *str2){
-        
-        return [NSString stringWithFormat:@"%@ %@", str1, str2];
-    }];
-    
-    [reduceSignal subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    // 输出
-    2017-01-03 15:42:41.803 ReactiveCocoa进阶[4248:1264674] A2 B1
-	2017-01-03 15:42:41.803 ReactiveCocoa进阶[4248:1264674] A2 B2
-	2017-01-03 15:42:41.803 ReactiveCocoa进阶[4248:1264674] A2 B3
-    
-	```
-	
-#### 过滤
-
-过滤就是过滤信号中的 特定值 ，或者过滤指定 发送次数 的信号。
-
-###### filter
-
-- **作用**
-
-	过滤信号，使用它可以获取满足条件的信号.
-	
-	block的返回值是Bool值，返回`NO`则过滤该信号
-	
-- **使用**
-
-	```
-	// 过滤:
-	// 每次信号发出，会先执行过滤条件判断.
-	[[_textField.rac_textSignal filter:^BOOL(NSString *value) {
-        
-        NSLog(@"原信号: %@", value);
-
-        // 过滤 长度 <= 3 的信号
-        return value.length > 3;
-        
-    }] subscribeNext:^(id x) {
-        
-        NSLog(@"长度大于3的信号：%@", x);
-    }];
-    
-    // 在_textField中输出12345
-	// 输出
-	2017-01-03 16:36:54.938 ReactiveCocoa进阶[4714:1552910] 原信号: 1
-	2017-01-03 16:36:55.383 ReactiveCocoa进阶[4714:1552910] 原信号: 12
-	2017-01-03 16:36:55.706 ReactiveCocoa进阶[4714:1552910] 原信号: 123
-	2017-01-03 16:36:56.842 ReactiveCocoa进阶[4714:1552910] 原信号: 1234
-	2017-01-03 16:36:56.842 ReactiveCocoa进阶[4714:1552910] 长度大于3的信号：1234
-	2017-01-03 16:36:58.350 ReactiveCocoa进阶[4714:1552910] 原信号: 12345
-	2017-01-03 16:36:58.351 ReactiveCocoa进阶[4714:1552910] 长度大于3的信号：12345
-	```
-	
-###### ignore
-
-- **作用**
-
-	忽略某些信号.
-	
-- **使用**
-
-- **作用**
-
-	忽略某些值的信号.
-	
-	底层调用了 `filter` 与 过滤值进行比较，若相等返回则 `NO`
-	
-- **使用**
-
-	```
-  	// 内部调用filter过滤，忽略掉字符为 @“1”的值
-[[_textField.rac_textSignal ignore:@"1"] subscribeNext:^(id x) {
-
- 	 NSLog(@"%@",x);
-}];
-
-
-	```
-
-###### distinctUntilChanged
-
-- **作用**
-
-	当上一次的值和当前的值有明显的变化就会发出信号，否则会被忽略掉。
-	
-- **使用**
-
-	```
-	[[_textField.rac_textSignal distinctUntilChanged] subscribeNext:^(id x) {
-        
-        NSLog(@"%@",x);
-    }];
-	```
-	
-###### skip	
-
-- **作用**
-
-	跳过 **第N次** 的发送的信号.
-	
-- **使用**
-	
-	```
-// 表示输入第一次，不会被监听到，跳过第一次发出的信号
-[[_textField.rac_textSignal skip:1] subscribeNext:^(id x) {
-
-   NSLog(@"%@",x);
-}];
-	```
-
-
-
-##### take
-- **作用**
-
-	取 **前N次** 的发送的信号.
-- **使用**
-
-	```
-	RACSubject *subject = [RACSubject subject] ;
-    
-    // 取 前两次 发送的信号
-    [[subject take:2] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    [subject sendNext:@1];
-    [subject sendNext:@2];
-    [subject sendNext:@3];
-    
-    // 输出
-	2017-01-03 17:35:54.566 ReactiveCocoa进阶[4969:1677908] 1
-	2017-01-03 17:35:54.567 ReactiveCocoa进阶[4969:1677908] 2
-	```
-
-###### takeLast
-
-- **作用**
-
-	取 **最后N次** 的发送的信号
-	
-	前提条件，订阅者必须调用完成 `sendCompleted`，因为只有完成，就知道总共有多少信号.
-	
-- **使用**	
-
-	```
-	RACSubject *subject = [RACSubject subject] ;
-    
-    // 取 后两次 发送的信号
-    [[subject takeLast:2] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    [subject sendNext:@1];
-    [subject sendNext:@2];
-    [subject sendNext:@3];
-    
-    // 必须 跳用完成
-    [subject sendCompleted];
-	```
-
-###### takeUntil
-
-- **作用**
-
-	获取信号直到某个信号执行完成
-- **使用**	
-
-	```
-	// 监听文本框的改变直到当前对象被销毁
-[_textField.rac_textSignal takeUntil:self.rac_willDeallocSignal];
-	```
-	
-###### switchToLatest
-- **作用**
-
-	用于signalOfSignals（信号的信号），有时候信号也会发出信号，会在signalOfSignals中，获取signalOfSignals发送的最新信号。
-	
-- **注意**
-
-	switchToLatest：只能用于信号中的信号
-
-- **使用**	
-
-	```
-	RACSubject *signalOfSignals = [RACSubject subject];
-    RACSubject *signal = [RACSubject subject];
-    
-    // 获取信号中信号最近发出信号，订阅最近发出的信号。
-    [signalOfSignals.switchToLatest subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    [signalOfSignals sendNext:signal];
-    [signal sendNext:@1];
-	```
-
-#### 秩序
-
-秩序包括 `doNext` 和 `doCompleted` 这两个方法，主要是在 执行`sendNext` 或者 `sendCompleted`之前，先执行这些方法中Block。
-
-###### doNext 
-	
-执行`sendNext`之前，会先执行这个`doNext`的 Block
-
-###### doCompleted
-
-执行`sendCompleted`之前，会先执行这`doCompleted`的`Block`
-
-```
-[[[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-    
-    [subscriber sendNext:@"hi"];
-    
-    [subscriber sendCompleted];
-    
-    return nil;
-    
-}] doNext:^(id x) {
-    
-    // 执行 [subscriber sendNext:@"hi"] 之前会调用这个 Block
-    NSLog(@"doNext");
-    
-}] doCompleted:^{
-    
-    // 执行 [subscriber sendCompleted] 之前会调用这 Block
-    NSLog(@"doCompleted");
-}] subscribeNext:^(id x) {
-    
-    NSLog(@"%@", x);
-}];
-    
-
+# 1. 部署SD
+
+安装miniconda，通过pytorch官网提供的命令下载对应的pytorch就可以了
+
+配置conda的数据源管道
+
+```config
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
+  - defaults
+show_channel_urls: true
+default_channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/r
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/msys2
+custom_channels:
+  conda-forge: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  msys2: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  bioconda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  menpo: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  pytorch: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  simpleitk: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
 ```
 
-#### 线程
+下载pytorch，conda中下载pytorch自带就有cuda的工具包，可以不需要单独在电脑上面安装cuda-toolkit的工具包了
 
-**ReactiveCocoa** 中的线程操作 包括 `deliverOn` 和 `subscribeOn`这两种，将 *传递的内容* 或 创建信号时 *block中的代码* 切换到指定的线程中执行。
+> ```cmd
+> conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+> ```
 
-###### deliverOn
 
-- **作用**
 
-	内容传递切换到制定线程中，副作用在原来线程中,把在创建信号时block中的代码称之为副作用。
-- **使用**
+## 1.1 安装SD
 
-	```
-	// 在子线程中执行
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        
-        [[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-            NSLog(@"%@", [NSThread currentThread]);
-            
-            [subscriber sendNext:@123];
-            
-            [subscriber sendCompleted];
-            
-            return nil;
-        }]
-          deliverOn:[RACScheduler mainThreadScheduler]]
-          
-         subscribeNext:^(id x) {
-         
-             NSLog(@"%@", x);
-             
-             NSLog(@"%@", [NSThread currentThread]);
-         }];
-    });
+git仓库中下载sd源码 **https://github.com/AUTOMATIC1111/stable-diffusion-webui.git**
+
+- 安装依赖，使用 pip 下载根目录下面的 **requirements_versions.txt** 文件
+- 如果pip缺少安装依赖，那么使用conda来进行对应的依赖下载
+- huggingface下载默认的模型：v1-5-pruned-emaonly.safetensors
+- 依赖下载完成后直接启动 **python launch.py** 即可
+
+## 1.2 插件
+
+### 1.2.1 中文插件
+
+[安装中文插件](https://github.com/dtlnor/stable-diffusion-webui-localization-zh_CN)：user interface中选择 Localization为中文即可
+
+![image-20240313213624093](images/image-20240313213624093.png)
+
+### 1.2.2 openvino加速插件
+
+[openvino低配置电脑加速插件)](https://github.com/openvinotoolkit/openvino)
+
+### 提示词插件
+
+[提示词插件](https://github.com/thisjam/sd-webui-oldsix-prompt)：NSFW 标签的提示词可以放到对应插件的 yours路径下面然后重启
+
+![image-20240313221035400](images/image-20240313221035400.png)
+
+### 1.2.3 提示词翻译插件（推荐）
+
+[提示词插件（带有翻译推荐使用）](https://github.com/Physton/sd-webui-prompt-all-in-one)
+
+### 1.2.4 抠图插件
+
+stable-diffusion-webui-rembg：非常强大的抠图功能
+
+### 1.2.5 TensorRT推理加速插件（推荐）
+
+[TensorRT推理加速插件](https://github.com/NVIDIA/Stable-Diffusion-WebUI-TensorRT)
+
+- 通过扩展插件的方式克隆下载
+- 启动时报错时可以进入扩展插件中打开 **install.py** 手动拿出来进行下载
+
+> pip install importlib_metadata 
+>
+> pip install nvidia-cudnn-cu11==8.9.4.25 --no-cache-dir
+>
+> pip install --pre --extra-index-url https://pypi.nvidia.com tensorrt==9.0.1.post11.dev4 --no-cache-dir
+>
+> pip install install polygraphy --extra-index-url https://pypi.ngc.nvidia.com
+>
+> pip install onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com
+>
+> pip install optimum
+
+第一步先选择对应的模型然后直接默认值跑预设，输出到处模型成功即可，模型的安装路径为 **\models\Unet-trt**，在设置里面用户界面找到 **sd-unet** 即可
+
+![image-20240318205840741](images/image-20240318205840741.png)
+
+**注意事项：如果使用的是默认预设，需要注意的是每次生成图片的参数不能超过模型规定的最大值和最小值之间，并且数值需要是64的倍数** 现在就可以看到出图的时间是非常的快了
+
+![image-20240318210139874](images/image-20240318210139874.png)
+
+#### 预设参数
+
+相同的参数设定下静态的预设比动态的预设性能更高显存占用更低
+
+![image-20240318212229709](images/image-20240318212229709.png)
+
+- 512 x 512 | Batch Size1(Static)
+  - static表示所有的参数都是固定的，每批的数量数，还有最优的高度和最高的宽度，所有的都固定了
+- 512 x 512 - 768 x 768 | Batch Size1 -4 
+  - 表示动态的参数设定，相当于就设置了一个范围
+  - 最优的宽度设置最常用的就好，出图更快
+  - 一个模型下面最多只能构建2个，点击强制重构后可以突破
+  - **静态和动态的模型会自动合并到一个模型下面，调用时会自动调用下面的最引擎**
+- **高阶用法**：、
+  - 想要多个预设进行切换就可以根据尺寸多生成几个静态的预设，后续大模型会自动调用（静态引擎没有限制，动态最多只能构建两个）
+  - **要想使用高分辨率修复，需要至少两个静态。例如：768x768和1536x1536 要与原尺寸和放大尺寸做匹配**
+  - **LoRA转换**：给lora加速，将lora转换TensorRT模型后，lora会自动融入到模型当中不用选择里面自带
+
+![image-20240318212616607](images/image-20240318212616607.png)
+
+### 1.2.6 图片放大插件
+
+[canvas-zoom](https://github.com/richrobber2/canvas-zoom)：shift+i 放大图片
+
+### 1.2.7 反推提示词插件
+
+[picobyte/stable-diffusion-webui-wd14-tagger](https://github.com/picobyte/stable-diffusion-webui-wd14-tagger)
+
+### 1.2.8 锁定分辨比例插件
+
+[sd-webui-aspect-ratio-helper](https://github.com/thomasasfk/sd-webui-aspect-ratio-helper)，可以用来锁定宽高比拉动时一起跟着改变
+
+### 1.2.9 脸部修复插件（adetailer）
+
+[Bing-su/adetailer](https://github.com/Bing-su/adetailer)
+
+为什么会脸部崩坏？**分辨率不够**
+
+#### 模型下载
+
+需要到 [Bingsu/adetailer at main (huggingface.co)](https://huggingface.co/Bingsu/adetailer/tree/main) 下载对应修复的模型文件，将其放到 **models/adetailer** 文件夹下面，设置里面将 **adetailer** 的最大模型设置为5
+
+- 模型的组成：修复的部位_使用的算法+版本+精度
+  - 例如：face_yolov8m，修复脸部，yolo算法，版本8，m代表中型
+  - s代表小型，n代表纳米（比小型更小），m代表中型，模型越小处理越快，代价就行精度更低
+- mediapipe_face_full：只能对真人起效果
+
+- face_yolov8m.pt：修复脸部
+- face_yolov8n_v2.pt：脸部修复（推荐使用，二次元和真人都有效）
+- hand_yolov8n.pt：修复手部
+- person_yolov8m-seg.pt：增加人物整体细节的模型
+
+![image-20240322111448369](images/image-20240322111448369.png)
+
+#### 参数说明
+
+- 检测设置：用于扩大检查的范围
+  - 检查模型置信度阈值：值越小，检测范围越大
+
+### 1.2.10 controlnet插件
+
+[Mikubill/sd-webui-controlnet: WebUI extension for ControlNet (github.com)](https://github.com/Mikubill/sd-webui-controlnet)
+
+## 1.3 资源
+
+- https://pan.quark.cn/s/656afd3bce60：b站小王子的AI 全资料
+
+- https://pan.quark.cn/s/ac0ff19bed5c：网上找到一下模型和插件的资源
+
+# 2. 参数详解
+
+- checkpoint：大模型，文件使用safetensors/ckpt结尾
+- lora：微调模型，一般对checkpoint的大模型进行微调，有些也是以 safetensors结尾
+
+## 2.1 模型的VAE
+
+变分自编码器，也是类似一种模型，在基础的模型上再进行训练提供更多的饱和度等
+
+作用：增加图片饱和度、降低灰度、让图片有更多色彩
+
+常用：vae-ft-mse-840000-ema-pruned-safetensors (可选)
+
+安装路径：models路径中的VAE
+
+## 2.2 Clip跳过层
+
+语言与图片对比预训练
+
+作用：让tag与图片建立关系；数值越高tag和图片关系就会低，数值越低tag和图片关系就越高，不要调整太高（关键词和图片会出现没有关系），默认1-4
+
+## 2.3 正向提示词和反向提示词
+
+正向提示词用于想要出现在图片中的元素，反向提示词用于不想要出现在图片中的元素
+
+正向提示词描述内容（人物例子）：主体、表情、服装、场景、环境、镜头、灯光、风格、画质、渲染器（其他的元素提示词）
+
+![image-20240313214625819](images/image-20240313214625819.png)
+
+Tag的格式：
+
+- 英文
+- 单词
+- 词组
+- 语句（推荐，ai识别度高）
+
+注意事项：
+
+- tag之间用英文的逗号进行分割
+- 靠前的tag权重比较高
+
+权重：
+
+- 括号法制
+
+  - ()  = 增加1.1倍
+  - {} = 增加1.05倍
+  - [] = 减少1.1 倍
+
+- 数字法则：
+
+  - (tag:1.3) = 增加1.3倍
+  - (tag:0.5) = 1/2的权重
+  - 大于一就是增加
+  - 小于一就是减少
+
+- 混合法则：
+
+  - tag AND tag
+
+  - [tag|tag]
+
     
-    // 输出
-2017-01-04 10:35:55.415 ReactiveCocoa进阶[1183:224535] <NSThread: 0x608000270f00>{number = 3, name = (null)}
-2017-01-04 10:35:55.415 ReactiveCocoa进阶[1183:224482] 123
-2017-01-04 10:35:55.415 ReactiveCocoa进阶[1183:224482] <NSThread: 0x600000079bc0>{number = 1, name = main}
-	```
-	
-	可以看到`副作用`在 *子线程* 中执行，而 `传递的内容` 在 *主线程* 中接收
-
-
-###### subscribeOn
-- **作用**
-
-	**subscribeOn**则是将 `内容传递` 和 `副作用` 都会切换到指定线程中
-- **使用**
-
-	```
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        
-        [[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-            NSLog(@"%@", [NSThread currentThread]);
-            
-            [subscriber sendNext:@123];
-            
-            [subscriber sendCompleted];
-            
-            return nil;
-        }]
-          subscribeOn:[RACScheduler mainThreadScheduler]] //传递的内容到主线程中
-         subscribeNext:^(id x) {
-         
-             NSLog(@"%@", x);
-             
-             NSLog(@"%@", [NSThread currentThread]);
-         }];
-    });	
-	//
-2017-01-04 10:44:47.558 ReactiveCocoa进阶[1243:275126] <NSThread: 0x608000077640>{number = 1, name = main}
-2017-01-04 10:44:47.558 ReactiveCocoa进阶[1243:275126] 123
-2017-01-04 10:44:47.558 ReactiveCocoa进阶[1243:275126] <NSThread: 0x608000077640>{number = 1, name = main}
-	```
-	
-	`内容传递` 和 `副作用` 都切换到了 *主线程* 执行
-	
-#### 时间
-
-时间操作就会设置信号超时，定时和延时。
-
-###### interval 定时
-- **作用**
-
-	定时：每隔一段时间发出信号
-	
-	```
-	// 每隔1秒发送信号，指定当前线程执行
-	[[RACSignal interval:1 onScheduler:[RACScheduler currentScheduler]] subscribeNext:^(id x) {
-        
-        NSLog(@"定时:%@", x);
-    }];
-    
-	// 输出
-	2017-01-04 13:48:55.196 ReactiveCocoa进阶[1980:492724] 定时:2017-01-04 05:48:55 +0000
-	2017-01-04 13:48:56.195 ReactiveCocoa进阶[1980:492724] 定时:2017-01-04 05:48:56 +0000
-	2017-01-04 13:48:57.196 ReactiveCocoa进阶[1980:492724] 定时:2017-01-04 05:48:57 +0000
-	```
-
-
-###### timeout 超时
-
-- **作用**
-
-	超时，可以让一个信号在一定的时间后，自动报错。
-	
-	```
-	RACSignal *signal = [[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        // 不发送信号，模拟超时状态
-        // [subscriber sendNext:@"hello"];
-        //[subscriber sendCompleted];
-        
-        return nil;
-    }] timeout:1 onScheduler:[RACScheduler currentScheduler]];// 设置1秒超时
-    
-    [signal subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    } error:^(NSError *error) {
-        
-        NSLog(@"%@", error);
-    }];
-    
-    // 执行代码 1秒后 输出：
-    2017-01-04 13:48:55.195 ReactiveCocoa进阶[1980:492724] Error Domain=RACSignalErrorDomain Code=1 "(null)"
-	```
-
-###### delay 延时
-- **作用**
-
-	延时，延迟一段时间后发送信号
-	
-	```
-	RACSignal *signal2 = [[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@"延迟输出"];
-        
-        return nil;
-    }] delay:2] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    // 执行代码 2秒后 输出
-    2017-01-04 13:55:23.751 ReactiveCocoa进阶[2030:525038] 延迟输出
-	```
-
-
-#### 重复
-
-###### retry
-
-- **作用**
-
-	重试：只要 发送错误 `sendError:`,就会 重新执行 创建信号的Block 直到成功
-	
-	```
-	__block int i = 0;
-    
-    [[[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        if (i == 5) {
-            
-            [subscriber sendNext:@"Hello"];
-            
-        } else {
-            
-            // 发送错误
-            NSLog(@"收到错误:%d", i);
-            [subscriber sendError:nil];
-        }
-        
-        i++;
-        
-        return nil;
-        
-    }] retry] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-        
-    } error:^(NSError *error) {
-        
-        NSLog(@"%@", error);
-        
-    }];
-
-	// 输出
-2017-01-04 14:36:51.594 ReactiveCocoa进阶[2443:667226] 收到错误信息:0
-2017-01-04 14:36:51.595 ReactiveCocoa进阶[2443:667226] 收到错误信息:1
-2017-01-04 14:36:51.595 ReactiveCocoa进阶[2443:667226] 收到错误信息:2
-2017-01-04 14:36:51.596 ReactiveCocoa进阶[2443:667226] 收到错误信息:3
-2017-01-04 14:36:51.596 ReactiveCocoa进阶[2443:667226] 收到错误信息:4
-2017-01-04 14:36:51.596 ReactiveCocoa进阶[2443:667226] Hello
-
-	```
-
-###### replay
-
-- **作用**
-
-	重放：当一个信号被多次订阅,反复播放内容
-	
-	```
-	RACSignal *signal = [[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        [subscriber sendNext:@1];
-        [subscriber sendNext:@2];
-        
-        return nil;
-    }] replay];
-    
-    [signal subscribeNext:^(id x) {
-        NSLog(@"%@", x);
-    }];
-    
-    [signal subscribeNext:^(id x) {
-        NSLog(@"%@", x);
-    }];
-    
-    // 输出
-2017-01-04 14:51:01.934 ReactiveCocoa进阶[2544:706740] 1
-2017-01-04 14:51:01.934 ReactiveCocoa进阶[2544:706740] 2
-2017-01-04 14:51:01.934 ReactiveCocoa进阶[2544:706740] 1
-2017-01-04 14:51:01.935 ReactiveCocoa进阶[2544:706740] 2
-	```
-
-
-###### throttle
-
-- **作用**
-
-	节流:当某个信号发送比较频繁时，可以使用节流，在某一段时间不发送信号内容，过了一段时间获取信号的最新内容发出。
-	
-	```
-	RACSubject *subject = [RACSubject subject];
-    
-    // 节流1秒，1秒后接收最后一个发送的信号
-    [[subject throttle:1] subscribeNext:^(id x) {
-        
-        NSLog(@"%@", x);
-    }];
-    
-    [subject sendNext:@1];
-    [subject sendNext:@2];
-    [subject sendNext:@3];
-    
-    // 输出
-    2017-01-04 15:02:37.543 ReactiveCocoa进阶[2731:758193] 3
-	```
-
-# MVVM架构思想
----
-程序为什么要有架构？便于程序开发与维护.
-
-#### 常见的架构
-- **MVC**
-
-	M:模型 V:视图 C:控制器
-
-- **MVVM**
-
-	M:模型 V:视图+控制器 VM:视图模型
-
-- **MVCS**
-
-	 M:模型 V:视图 C:控制器 C:服务类
-
-- [**VIPER**](http://www.cocoachina.com/ios/20140703/9016.html)
-
-	V:视图 I:交互器 P:展示器 E:实体 R:路由
-
-#### MVVM介绍
-
-- 模型(M):保存视图数据。
-
-- 视图+控制器(V):展示内容 + 如何展示
-
-- 视图模型(VM):处理展示的业务逻辑，包括按钮的点击，数据的请求和解析等等。
-
-# 实战一：登录界面
-
-#### 需求
-1. 监听两个文本框的内容
-2. 有内容登录按键才允许按钮点击
-3. 返回登录结果
-
-#### 分析
-1. 界面的所有业务逻辑都交给控制器做处理
-2. 在MVVM架构中把控制器的业务全部搬去VM模型，也就是每个控制器对应一个VM模型.
-
-#### 步骤
-1. 创建LoginViewModel类，处理登录界面业务逻辑.
-2. 这个类里面应该保存着账号的信息，创建一个账号Account模型
-3. LoginViewModel应该保存着账号信息Account模型。
-4. 需要时刻监听Account模型中的账号和密码的改变，怎么监听？
-5. 在非RAC开发中，都是习惯赋值，在RAC开发中，需要改变开发思维，由赋值转变为绑定，可以在一开始初始化的时候，就给Account模型中的属性绑定，并不需要重写set方法。
-6. 每次Account模型的值改变，就需要判断按钮能否点击，在VM模型中做处理，给外界提供一个能否点击按钮的信号.
-7. 这个登录信号需要判断Account中账号和密码是否有值，用KVO监听这两个值的改变，把他们聚合成登录信号.
-8. 监听按钮的点击，由VM处理，应该给VM声明一个RACCommand，专门处理登录业务逻辑.
-9. 执行命令，把数据包装成信号传递出去
-10. 监听命令中信号的数据传递
-11. 监听命令的执行时刻
-
-
-
-#### 运行效果
-
-![登录界面](https://ww3.sinaimg.cn/large/006y8lVagw1fbgvoh8yu6j30bj0l43yz.jpg)
-
-#### 代码
-
-`MyViewController.m`
-
-```
-#import "MyViewController.h"
-#import "LoginViewModel.h"
-
-@interface MyViewController ()
-
-@property (nonatomic, strong) LoginViewModel *loginViewModel;
-
-@property (weak, nonatomic) IBOutlet UITextField *accountField;
-
-@property (weak, nonatomic) IBOutlet UITextField *pwdField;
-
-@property (weak, nonatomic) IBOutlet UIButton *loginBtn;
-
-@end
-
-@implementation MyViewController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    
-    [self bindModel];
-    
-}
-
-- (void)didReceiveMemoryWarning {
-    [super didReceiveMemoryWarning];
-    // Dispose of any resources that can be recreated.
-}
-
-
-
-// 视图模型绑定
-- (void)bindModel {
-
-    // 给模型的属性绑定信号
-    //
-    RAC(self.loginViewModel.account, account) = _accountField.rac_textSignal;
-    RAC(self.loginViewModel.account, pwd) = _pwdField.rac_textSignal;
-    
-    RAC(self.loginBtn, enabled) = self.loginViewModel.enableLoginSignal;
-    
-    // 监听登录点击
-    [[_loginBtn rac_signalForControlEvents:UIControlEventTouchUpInside] subscribeNext:^(id x) {
-        
-        [self.loginViewModel.LoginCommand execute:nil];
-    }];
-    
-}
-- (IBAction)btnTap:(id)sender {
-    
-    
-}
-
-#pragma mark - lazyLoad
-
-- (LoginViewModel *)loginViewModel {
-    
-    if (nil == _loginViewModel) {
-        _loginViewModel = [[LoginViewModel alloc] init];
-    }
-    
-    return _loginViewModel;
-}
-```	
-		
-`LoginViewModel.h`
-
-```
-#import <UIKit/UIKit.h>
-
-@interface Account : NSObject
-
-@property (nonatomic, strong) NSString *account;
-@property (nonatomic, strong) NSString *pwd;
-
-@end
-
-
-@interface LoginViewModel : UIViewController
-
-@property (nonatomic, strong) Account *account;
-
-// 是否允许登录的信号
-@property (nonatomic, strong, readonly) RACSignal *enableLoginSignal;
-
-@property (nonatomic, strong, readonly) RACCommand *LoginCommand;
-
-@end
 
+## 2.4 采样步数（Steps）
+
+范围 **1 - 50**
+
+- 数值越高：细节越多，渲染越慢
+- 数值越低：细节越少，渲染越快
+- 建议范围：20 - 40
+
+![](images/steps.png)
+
+## 2.5 采样器
+
+根据名称进行划分，**步数越少图片效果越好的采样器就好**
+
+- 采样器带a的：噪点不居中，关键词识别稍低
+- karras：去噪快
+- DDIM & PLMS：sd最早的采样器（过时）
+- DPM：**比较建议使用DPM++SDE Karras** 做人像
+
+![](images/采样器.png)
+
+## 2.6 面部修复
+
+渲染任务图时记得勾上，提高sd对人体面部的细节捕捉
+
+## 2.7 无缝贴图
+
+主要用来做纹理图按背景的，平时不要用
+
+## 2.8 高分辨率修复
+
+用于修复图片的
+
+## 2.9 宽度和高度
+
+像素稳准，跟显存有关系
+
+- 512x512
+- 768x768
+
+## 2.10 生成次数和每次数量
+
+- 生成次数：一个一个生成x张图片（显存低用这个）
+- 每次数量：同时生成x张图（高显存用这个）
+
+## 2.11 提示词相关性（CFG Scale）
+
+文字和图片的相关度 **建议4 - 9之间**，有可能跟采样器有关系
+
+- 数值高：tag和图片的相关度就高
+- 数值低：tag和图片的相关度就低
+
+## 2.12 随机种子（Seed）
+
+如果是 -1 那么生成的图片全部都会是随机
+
+循环标志：复制上一张图的种子
+
+![image-20240313222409523](images/image-20240313222409523.png)
+
+## 2.13 随机数差异种子
+
+有点像是两个随机数的相总和
+
+## 2.14 差异强度
+
+随机种子和差异随机种子各占不同的比例
+
+# 3. 模板预设
+
+用于保存提示词的地方
+
+![image-20240314211634069](images/image-20240314211634069.png)
+
+# 4. 嵌入式（Embedding）
+
+也叫做 **Textual inversion** 把关键词打包为一个小模型，如果出现成千上百的关键词就可以将其进行打包，安装路径 **根目录 \embeddings**，在生成特点人物形象、画风、姿势动作上应用广泛；使用的最多是在 **方向提示词** 可以将很多负面提示词打包成一个嵌入式模型，应用时只需要输入文件名就可以，推荐模型
+
+- badhandv4:修复手指
+- easynegative
+
+# 5. 超网络（Hypernetworks）
+
+主要影响画风，对人物还原准确度帮助不大，放在 **model\hypernetwork** 文件夹下
+
+# 6. Checkpoint
+
+大模型，平均几个G以上
+
+# 7. Lora
+
+小模型，在大模型的基础进行微调
+
+# 8. 脚本
+
+## 8.1 提示词矩阵（Prompt matrix）
+
+在对比元素tag之间的区别时使用，例如：固定不变主题tag | 变量1 | 变量2....
+
+图片制作出来像是一个矩阵一样，主要看不同灯光下的区别
+
+![image-20240314213810568](images/image-20240314213810568.png)
+
+## 8.2 从文本框或文件载入提示词
+
+**Prompts from file or textbox**
+
+如果关键词过多了可用通过文件进行导入
+
+格式为：
+
+```txt
+-- prompt "提示词" -- steps 28
 ```
 
-`LoginViewModel.m`
-
-```
-#import "LoginViewModel.h"
-
-@implementation Account
-
-@end
-
-
-@interface LoginViewModel ()
-
-@end
-
-@implementation LoginViewModel
-
-- (instancetype)init {
-    
-    if (self = [super init]) {
-        [self initialBind];
-    }
-    return self;
-}
-
-- (void)initialBind {
-
-    // 监听账号属性改变， 把他们合成一个信号
-    _enableLoginSignal = [RACSubject combineLatest:@[RACObserve(self.account, account), RACObserve(self.account, pwd)] reduce:^id(NSString *accout, NSString *pwd){
-        
-        return @(accout.length && pwd.length);
-    }];
-    
-    // 处理业务逻辑
-    _LoginCommand = [[RACCommand alloc] initWithSignalBlock:^RACSignal *(id input) {
-        
-        NSLog(@"点击了登录");
-        return [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-            
-            // 模仿网络延迟
-
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                
-                // 返回登录成功 发送成功信号
-                [subscriber sendNext:@"登录成功"];
-            });
-            
-            return nil;
-        }];
-    }];
-    
-    
-    // 监听登录产生的数据
-    [_LoginCommand.executionSignals.switchToLatest subscribeNext:^(id x) {
-       
-        if ([x isEqualToString:@"登录成功"]) {
-            NSLog(@"登录成功");
-        }
-        
-    }];
-    
-    [[_LoginCommand.executing skip:1] subscribeNext:^(id x) {
-        
-        if ([x isEqualToNumber:@(YES)]) {
-            
-            NSLog(@"正在登陆...");
-        } else {
-            
-        // 登录成功
-        NSLog(@"登陆成功");
-        
-        }
-        
-    }];
-}
-
-#pragma mark - lazyLoad
-
-- (Account *)account
-{
-    if (_account == nil) {
-        _account = [[Account alloc] init];
-    }
-    return _account;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    
-}
-
-@end
-
-```
-
-# 实战二：网络请求数据
-
-#### 需求
-1. 请求一段网络数据，将请求到的数据在`tableView`上展示
-2. 该数据为豆瓣图书的搜索返回结果，URL：url:https://api.douban.com/v2/book/search?q=悟空传
-
-#### 分析
-1. 界面的所有业务逻辑都交给**控制器**做处理
-2. 网络请求交给**MV**模型处理
-
-#### 步骤
-
-1. 控制器提供一个视图模型（requesViewModel），处理界面的业务逻辑
-2. VM提供一个命令，处理请求业务逻辑
-3. 在创建命令的block中，会把请求包装成一个信号，等请求成功的时候，就会把数据传递出去。
-4. 请求数据成功，应该把字典转换成模型，保存到视图模型中，控制器想用就直接从视图模型中获取。
-
-#### 其他
-
-网络请求与图片缓存用到了[AFNetworking](https://github.com/AFNetworking/AFNetworking) 和 [SDWebImage](https://github.com/rs/SDWebImage),自行在Pods中导入。
-
-```
-platform :ios, '8.0'
-
-target 'ReactiveCocoa进阶' do
-
-use_frameworks!
-pod 'ReactiveCocoa', '~> 2.5'
-pod 'AFNetworking'
-pod 'SDWebImage'
-end
-```
-
-#### 运行效果
-
-![](https://ww3.sinaimg.cn/large/006y8lVagw1fbgw1xnz74j30bj0l4408.jpg)
-
-
-#### 代码
-
-`SearchViewController.m`
+## 8.3 x/y/z 图表
 
-```
-#import "SearchViewController.h"
-#import "RequestViewModel.h"
+可以根据选择的参数进行调整来对比各个模型和参数之间的效果
 
-@interface SearchViewController ()<UITableViewDataSource>
+![image-20240314214555324](images/image-20240314214555324.png)
 
-@property (nonatomic, strong) UITableView *tableView;
+![image-20240314214546171](images/image-20240314214546171.png)
 
-@property (nonatomic, strong) RequestViewModel *requesViewModel;
+例如：需要对比不同迭代步数、CFG以及不同采样器对提示词的影响，可以设置如下：
 
-@end
+- x轴steps：20-30[3] 意思我只需要出5张图，具体由模型来分配步数
+- y轴CFG: 5-10[3] 提示词的相关性，也是五张图，由模型来分配
+- z轴sampler：表示在两种采样器的情况下进行对比
 
-@implementation SearchViewController
-
-- (RequestViewModel *)requesViewModel
-{
-    if (_requesViewModel == nil) {
-        _requesViewModel = [[RequestViewModel alloc] init];
-    }
-    return _requesViewModel;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    
-    
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.frame];
-    
-    self.tableView.dataSource = self;
-    
-    [self.view addSubview:self.tableView];
-    
-    //
-    RACSignal *requesSiganl = [self.requesViewModel.reuqesCommand execute:nil];
-    
-    [requesSiganl subscribeNext:^(NSArray *x) {
-        
-        self.requesViewModel.models = x;
-        
-        [self.tableView reloadData];
-    }];
-}
 
-- (void)didReceiveMemoryWarning {
-    [super didReceiveMemoryWarning];
-    // Dispose of any resources that can be recreated.
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
-{
-    return self.requesViewModel.models.count;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    static NSString *ID = @"cell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:ID];
-    if (cell == nil) {
-        
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:ID];
-    }
-    
-    Book *book = self.requesViewModel.models[indexPath.row];
-    cell.detailTextLabel.text = book.subtitle;
-    cell.textLabel.text = book.title;
-    
-    [cell.imageView sd_setImageWithURL:[NSURL URLWithString:book.image] placeholderImage:[UIImage imageNamed:@"cellImage"]];
-    
-    
-    return cell;
-}
-@end
-```
-
-`RequestViewModel.h`
-
-```
-#import <Foundation/Foundation.h>
-
-@interface Book : NSObject
-
-@property (nonatomic, copy) NSString *subtitle;
-@property (nonatomic, copy) NSString *title;
-@property (nonatomic, copy) NSString *image;
-
-@end
-
-@interface RequestViewModel : NSObject
-
-// 请求命令
-@property (nonatomic, strong, readonly) RACCommand *reuqesCommand;
-
-//模型数组
-@property (nonatomic, strong) NSArray *models;
-
-
-@end
-```
-
-`RequestViewModel.m`
-
-```
-#import "RequestViewModel.h"
-
-@implementation Book
-
-- (instancetype)initWithValue:(NSDictionary *)value {
-    
-    if (self = [super init]) {
-        
-        self.title = value[@"title"];
-        self.subtitle = value[@"subtitle"];
-        self.image = value[@"image"];
-    }
-    return self;
-}
-
-+ (Book *)bookWithDict:(NSDictionary *)value {
-    
-    return [[self alloc] initWithValue:value];
-}
-
-
-
-@end
-
-@implementation RequestViewModel
-
-- (instancetype)init
-{
-    if (self = [super init]) {
-        
-        [self initialBind];
-    }
-    return self;
-}
-
-
-- (void)initialBind
-{
-    _reuqesCommand = [[RACCommand alloc] initWithSignalBlock:^RACSignal *(id input) {
-        
-      RACSignal *requestSiganl = [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-          
-          NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
-          parameters[@"q"] = @"悟空传";
-          
-          //
-          [[AFHTTPSessionManager manager] GET:@"https://api.douban.com/v2/book/search" parameters:parameters progress:^(NSProgress * _Nonnull downloadProgress) {
-              
-              NSLog(@"downloadProgress: %@", downloadProgress);
-          } success:^(NSURLSessionDataTask * _Nonnull task, id  _Nullable responseObject) {
-              
-              // 数据请求成功就讲数据发送出去
-              NSLog(@"responseObject:%@", responseObject);
-              
-              [subscriber sendNext:responseObject];
-              
-              [subscriber sendCompleted];
-              
-          } failure:^(NSURLSessionDataTask * _Nullable task, NSError * _Nonnull error) {
-              
-              NSLog(@"error: %@", error);
-          }];
-          
-          
-         return nil;
-      }];
-        
-        // 在返回数据信号时，把数据中的字典映射成模型信号，传递出去
-        return [requestSiganl map:^id(NSDictionary *value) {
-            
-            NSMutableArray *dictArr = value[@"books"];
-            
-            NSArray *modelArr = [[dictArr.rac_sequence map:^id(id value) {
-                
-                return [Book bookWithDict:value];
-                
-            }] array];
-            
-            return modelArr;
-            
-        }];
-        
-    }];
-}
-
-
-@end
-
-```
-
->最后附上GitHub：<https://github.com/haijun/ReactiveCocoa_Demo>
+
+![image-20240316110710073](images/image-20240316110710073.png)
+
+## 8.4 StableSR
+
+[StableSR图像放大算法脚本](https://github.com/pkuliyi2015/sd-webui-stablesr)，秒杀4x-UltraSharp，按照官网文档使用即可
+
+- 需要配合一个大模型一起使用 [stabilityai/stable-diffusion-2-1-base](https://huggingface.co/stabilityai/stable-diffusion-2-1-base/tree/main)
+- 安装脚本内置模型：[stablesr_webui_sd-v2-1-512-ema](https://drive.google.com/file/d/1tWjkZQhfj07sHDR4r9Ta5Fk4iMp1t3Qw/view)，打开网页直接下载即可，放大扩展插件的 **StableSR** 文件路径下面的 models
+- 安装需要的插件：**Tiled Diffusion、Tiled VAE** 直接扩展里面安装即可
+
+
+
+# 9. 图生图
+
+- **重绘强度（核心）**：强度越低跟原图相近，如果太高就会跟原图不一样
+- 缩放模式：
+  - 拉伸：把图片硬拉成想要的尺寸
+  - 裁剪：图片裁剪
+  - 填充：最后一个像素进行填充，以最边上的像素为基础（跟重绘强度配合使用）
+  - 直接缩放：类似拉伸
+
+### 9.1 图生图（手绘修正/Sketch）
+
+可以通过笔刷在原图上面进行修改，根据笔刷的颜色来进行绘图
+
+### 9.2 局部重绘（inpaint）
+
+- 蒙版模糊度：给蒙版加高斯模糊，就是给蒙版添加模糊度，值越低模糊的越少，值越高蒙版效果越柔和
+- 蒙版区域：
+  - 蒙版内：蒙版涂在哪里就重绘哪里
+  - 蒙版外：图哪里就不重绘哪里
+- 重绘参考内容：
+  - 原图像素：AI渲染时必须要考虑原图的色素进行重绘
+  - 填充空白：渲染时不需要考虑原图，自己随便画
+- 重绘画布大小：
+  - 以原图尺寸重绘：会以整个图片的尺寸来进行重绘
+  - 以蒙版尺寸重绘：按照蒙版的大小进行重绘（局部修复推荐使用）
+  - 以蒙版尺寸重绘时的外部填充半径：（建议默认32）
+    - 值越少参考周围像素就越少
+    - 值越高参考周围像素就越多
+
+### 9.3 局部重绘（有色蒙版）
+
+跟 **局部重绘** 差不多，可以上蒙版也可以上颜色
+
+### 9.4 局部重绘（上传蒙版）
+
+可以使用ps添加蒙版然后上传进行调整
+
+# 10. Extras高清化
+
+**有些会翻译为附加功能**
+
+![image-20240317110251842](images/image-20240317110251842.png)
+
+- 单张图像：单张图进行处理
+- 批量处理：多张图上传
+- 从目录进行批量处理：从文件夹下面开始处理
+
+## 10.1 参数
+
+### 等比例缩放
+
+按照原图的比例进行缩放，如果设置为2，就会放大原来的1倍
+
+### 指定分辨率缩放
+
+设置图片的指定分辨率，**如果图片跟指定分辨不符合一定要勾选选 裁剪以适应宽高化**
+
+### 放大算法（Upscaler 1）
+
+**无脑使用** **[4x-UltraSharp](https://mega.nz/folder/qZRBmaIY#nIG8KyWFcGNTuMX_XNbJ_g)** 插件下载到 **models\ESRGAN** 路径下面
+
+**如果是动漫无脑使用** **R-ESRGAN 4x+ Anime6B** 进行放大
+
+### 放大算法（Upscaler 2）
+
+本来的目的是为了权衡图片的材质避免过度磨皮，有了 **4x-UltraSharp** 后就不需要了
+
+### GFPFAM
+
+**用于修复模糊的图片，面部修复（只能将面部进行修复）**
+
+### CodeFormer
+
+也是用于修复模糊图片的面部，可以跟 **GFPFAM一起使用**，当两个都调为1的时候效果最好
+
+### stable-diffusion-webui-rembg
+
+抠图插件，抠图算法
+
+- u2net_human-seg：做人类抠图时效果最好
+- u2net_cloth_seg：模特换装比较好用，会扣取人物的衣服和裤子等
+- isnet_anime：给动漫抠图的时候效果最好
+
+参数
+
+- return mask：返回一个蒙版
+- alpha matting：
+  - Erode Size：主体边缘像素预留区域（侵蚀量），保留主体的边缘留下的一下像素，类似边缘模糊，越高效果越不好但是可以去黑边
+  - Foreground threshold：前景阈值
+  - Backgorund threshold：背景阈值
+
+推荐预设值
+
+- u2net：
+  - Erode Size：6
+  - Foreground：143
+  - Background：187
+
+## 10.2 图片信息
+
+右边会出现一些图片的一些提示词和反向提示
+
+![image-20240317113239780](images/image-20240317113239780.png)
+
+
+
+# 8. lora训练
+
+## 8.1 如何选取最优素材
+
+- 不同面部表情
+- 构图，各种姿势的图片（侧面、背面、正面、仰视、俯视等等）
+- 人物特征（不同颜色的衣服、不同场景）
+- 灯光
+- 图片质量（不要出现画质不好的图片）
+- 以上满足越多越好
+
+## 8.2 素材来源
+
+- 真人写实：建议自己的照片先练手（本地部署不会出现泄露）
+- 动漫风格：影视截图
+- 模型生成的图片，使用模型生成的图片来训练模型
+- 人物、动漫、面部等：只要需要15张图片
+- 复杂的场景需要越多越好
+
+## 8.3 推荐步数（建议）
+
+- 每张图片需要训练的次数越多细节越明显（建议最少10步，但不要过高）
+- 二次元：10 - 16步
+- 写实人物：17 - 35步
+- 场景：50步起
+- lora训练总部署：1500 - 6000步
+- checkpoint训练总步数：30000步起
+
+## 8.4 软件
+
+- kohya_ss：训练页面 [bmaltais/kohya_ss (github.com)](https://github.com/bmaltais/kohya_ss)
+- Additional Networks插件
+- CUDNN训练加速器（30系以下忽略）
+- 参数预设
+
+安装 **kohya_ss** 安装时需要使用 **powershell** 管理员运行执行
+
+> Set-ExecutionPolicy Unrestricted
+
+克隆仓库，直接执行 **setup.bat**
+
+安装**SD** 插件后就有
+
+![image-20240314215754826](images/image-20240314215754826.png)
+
+## 8.5 Tag标记
+
+### 1. 图片Tag自动标记
+
+新版移到了附加功能当中，从目录进行批量处理
+
+- 输入目录：图片的路径
+- 输出目录：定义模型的地址
+  - image：图片的地址，图片的文件名称格式必须是 **数字_你想起的名称**，例如：30_xwz，数字代表文件夹内每张图片需要训练的步数，lora建议 **1500 - 6000张**；
+  - log：运行的日志
+  - model：模型的保存地方
+
+![image-20240314220924696](images/image-20240314220924696.png)
+
+身体每张训练100步，头部训练100步，根据图片来定义
+
+![image-20240314221258730](images/image-20240314221258730.png)
+
+然后将输出的地址粘贴到输出栏中
+
+![image-20240314221234992](images/image-20240314221234992.png)
+
+### 2. Bucket自动裁剪
+
+宽高不需要指定（保持默认的宽高），让AI自动来适应，一般使用 **kohyass** 使用Bucket
+
+![image-20240314221814199](images/image-20240314221814199.png)
+
+### 3. 创建镜像副本
+
+就是水平翻转，多给你复制一张另一面的图片，一般用在图片比较少的时候
+
+### 4. Caption
+
+- Deepbooru：使用单词的形式做反推
+- BLIP：使用句子的形式做反推（建议使用）
+
+### 5. Tag
+
+执行完之后就会在对应的路径下面生成两个文件，一个图片，另一个是跟图片相同的描述值，里面可以自己进行修改
+
+![image-20240314223349913](images/image-20240314223349913.png)
+
+## 8.6 kohya_ss
+
+![image-20240314222632209](images/image-20240314222632209.png)
+
+- Dreambooth：训练大模型
+
+- Lora：训练lora模型
+
+- Textual Inversion：嵌入式模型
+
+- Finetuning：模型微调的页面
+
+- Utilities：给模型打tag
+
+  
+
+### 1. 参数说明
+
+Configuration：预设值，根据显存进行调整的，可以直接下载
+
+![image-20240314222957017](images/image-20240314222957017.png)
