@@ -60,7 +60,7 @@ git仓库中下载sd源码 **https://github.com/AUTOMATIC1111/stable-diffusion-w
 
 [安装中文插件](https://github.com/dtlnor/stable-diffusion-webui-localization-zh_CN)：user interface中选择 Localization为中文即可
 
-![image-20240313213624093](images/image-20240313213624093.png)
+![image-20240313213624093](https://cdn.jsdelivr.net/gh/hackerhaiJu/note-picture@main/note-picture/image-20240313213624093.png)
 
 ### 1.2.2 openvino加速插件
 
